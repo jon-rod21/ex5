@@ -37,12 +37,10 @@ queue_t* create(int maxSize)
     return q;
 }
 
-
 int isEmpty(queue_t *q)
 {
     return q->size == 0;
 }
-
 
 int dequeue(queue_t *q)
 {
@@ -52,10 +50,8 @@ int dequeue(queue_t *q)
     return cust_id;
 }
 
-
 void enqueue(queue_t *q, int cust_id)
 {
-
     q->rear = (q->rear + 1) % q->maxSize;
     q->customers[q->rear] = cust_id;
     q->size++;
@@ -73,6 +69,7 @@ void freeQueue(queue_t *q)
 queue_t *waiting_room;
 pthread_mutex_t q_mut;
 pthread_mutex_t p_mut;
+pthread_mutex_t a_mut;
 sem_t waiting;
 sem_t ready;
 sem_t *done;
@@ -88,54 +85,59 @@ void* barber_thread()
         pthread_mutex_lock(&q_mut);
         if (isEmpty(waiting_room))
         {
+            pthread_mutex_lock(&p_mut);
+            printf("Barber is sleeping\n");
+            pthread_mutex_unlock(&p_mut);
             pthread_mutex_unlock(&q_mut);
             break;
         }
 
         int cust_id = dequeue(waiting_room);
-        available++;
 
+        pthread_mutex_lock(&a_mut);
+        available++;
+        pthread_mutex_unlock(&a_mut);
         pthread_mutex_unlock(&q_mut);
 
         pthread_mutex_lock(&p_mut);
         printf("Barber is cutting hair of Customer %d.\n", cust_id);
         pthread_mutex_unlock(&p_mut);
 
-
         sem_post(&done[cust_id]);
 
-        sleep(100);
+        sleep(5);
 
         completed++;
         
         pthread_mutex_lock(&p_mut);
-        printf("Barber finished cutting %d's hair. No. of cuts so far = %d\n", cust_id, completed);
+        printf("Barber finished cutting hair of Customer %d. No. of cuts so far = %d\n", cust_id, completed);
 
         pthread_mutex_unlock(&p_mut);
-
     }
     return NULL;
 }
-
 
 void* customer_thread(void *arg)
 {
     int id = *(int*)arg;
     free(arg);
 
+tryagain:
 
     pthread_mutex_lock(&p_mut);
-    printf("Customer %d has walked into the Barber Shop.\n", id);
+    printf("Customer %d enters the shop.\n", id);
     pthread_mutex_unlock(&p_mut);
 
-
     pthread_mutex_lock(&q_mut);
+    pthread_mutex_lock(&a_mut);
     if (available > 0)
     {
         available--;
+        pthread_mutex_unlock(&a_mut);
+
         enqueue(waiting_room, id);
         pthread_mutex_lock(&p_mut);
-        printf("Customer %d is in the waiting room. Waiting customers = %d\n", id, waiting_room->size);
+        printf("Customer %d takes a seat. Waiting customers = %d\n", id, waiting_room->size);
         pthread_mutex_unlock(&p_mut);
 
         pthread_mutex_unlock(&q_mut);
@@ -145,14 +147,16 @@ void* customer_thread(void *arg)
         sem_wait(&done[id]);
 
         pthread_mutex_lock(&p_mut);
-        printf("Customer %d is getting faded up.\n", id);
+        printf("Customer %d is getting a haircut.\n", id);
         pthread_mutex_unlock(&p_mut);
 
-        sleep(100);
+        sleep(1);
 
         pthread_mutex_lock(&p_mut);
-        printf("Customer %d is now leaving the Barber Shop.\n", id);
+        printf("Customer %d leaves the shop.\n", id);
         pthread_mutex_unlock(&p_mut);
+
+        pthread_mutex_unlock(&q_mut);
     }
     else
     {
@@ -160,6 +164,10 @@ void* customer_thread(void *arg)
         printf("Customer %d found no empty chair. Leaving.\n", id);
         pthread_mutex_unlock(&p_mut);
         pthread_mutex_unlock(&q_mut);
+        pthread_mutex_unlock(&a_mut);
+
+        sleep(6);
+        goto tryagain;
     }
 
     return NULL;
@@ -170,7 +178,7 @@ int main(int argc, char* argv[])
 {
     if (argc != 3)
     {
-        printf("invalid arguments");
+        printf("invalid arguments\n");
         return -1;
     }
 
@@ -182,7 +190,6 @@ int main(int argc, char* argv[])
         printf("Number of customers and chairs must be positive\n");
         return 1;
     }
-
     
     num_chairs = num_chairs_in;
     available = num_chairs;
@@ -206,6 +213,7 @@ int main(int argc, char* argv[])
 
     pthread_mutex_init(&q_mut, NULL);
     pthread_mutex_init(&p_mut, NULL);
+    pthread_mutex_init(&a_mut, NULL);
 
     pthread_t barber;
     pthread_t *customers = (pthread_t*)malloc(num_cust * sizeof(pthread_t));
@@ -217,7 +225,7 @@ int main(int argc, char* argv[])
         int *id = malloc(sizeof(int));
         *id = i;
         pthread_create(&customers[i], NULL, customer_thread, id);
-        sleep(500);
+        sleep(1);
     }
 
     for (int i = 0; i < num_cust; i++)
